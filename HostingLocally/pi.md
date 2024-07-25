@@ -10,7 +10,12 @@ which I got `https://hydra.nixos.org/build/267286598` which gives me this [downl
 We want to download the file and then decompress the `.zst` file. 
 There are many ways to do this but I'm using nix-shell since I'm already used to it
 
-![WHAT](https://cdn.discordapp.com/attachments/1039619925284749406/1266004795534082131/image.png "Title")
+![WHAT](https://raw.githubusercontent.com/NitroSniper/Blogs/main/HostingLocally/getting_hyda_img.png "Title")
+
+
+Now we have the `.img` file and now we just need to burn it onto a SD card. You can use various software such as Etcher but I'm using a tool called Caligula
+
+!
 
 
 
