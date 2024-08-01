@@ -1,6 +1,139 @@
 # Hosting on the Web without the Fluff
 
 
+## Project Overview
+
+I have a small rust web app which can be found [here](https://github.com/NitroSniper/ortin.git) which is using axum on the backend and just serve static pages rn.
+I want to host this service on the web, However I don't have a continuous income that I can burn on a EC2 instance.
+
+So I'm gonna host this on a second hand rasberry pi 3B+ I found at Cex, which doesn't have the best performance.
+If I want my web app to be peformant, I will need to reduce as much fluff while still mataining core logic.
+
+I'm already writing in Rust which is already a performant language but I need to wrap this project as a Docker Image since it is really easy to distribute.
+However if I to create this via a crude Dockerfile 
+
+
+```dockerfile
+FROM rust:1.67 as builder
+WORKDIR /usr/src/myapp
+COPY . .
+RUN cargo install --path .
+
+FROM debian:bullseye-slim
+RUN apt-get update && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /usr/local/cargo/bin/myapp /usr/local/bin/myapp
+CMD ["myapp"]
+```
+
+
+!!!!!!!!!!!!!!!!!!!TODO!!!!!!!!!!!!!
+
+This image is quite large and contains some fluff that we don't need. However I know a way to reduce it with a tool that is powering my entire workstation, **Nix**
+
+## Creating a Nix Flake
+
+```nix
+{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    flake-utils.url = "github:numtide/flake-utils";
+
+    # rust dev toolchain
+    rust-overlay = {
+      url = "github:oxalica/rust-overlay";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+  };
+
+  outputs =
+    { ... }@inputs:
+    inputs.flake-utils.lib.eachDefaultSystem (
+      system:
+      let
+        overlays = [ (import inputs.rust-overlay) ];
+        pkgs = import inputs.nixpkgs { inherit system overlays; };
+
+        # Binary name of cargo project
+        name = "ortin";
+
+        # Build rust binary 
+        bin = (
+          pkgs.rustPlatform.buildRustPackage {
+            inherit name;
+            cargoLock.lockFile = ./Cargo.lock;
+            src = pkgs.lib.cleanSource ./.;
+            postInstall = ''
+              mkdir app/
+              mv resources/ $out/
+            '';
+          }
+        );
+
+        # Build Docker Image
+        docker = pkgs.dockerTools.buildImage {
+          inherit name;
+          tag = "latest";
+
+          copyToRoot = [ bin ];
+
+          config = {
+            Cmd = [ "/bin/${name}" ];
+            WorkingDir = "/";
+          };
+        };
+      in
+      with pkgs;
+      {
+        packages = {
+          inherit bin docker;
+          default = bin;
+        };
+
+
+        # Custom dev shell with nix develop
+        devShells.default = mkShell {
+          buildInputs = [
+            (rust-bin.stable.latest.default.override {
+              extensions = [
+                "rust-src"
+                "rustfmt"
+                "rust-analyzer"
+              ];
+            })
+            bacon
+            tailwindcss
+            hey
+            watchexec
+            djlint
+            # dive 
+          ];
+        };
+        env = {
+          # Required by rust-analyzer
+          RUST_SRC_PATH = "${pkgs.rustToolchain}/lib/rustlib/src/rust/library";
+        };
+      }
+    );
+}
+```
+
+This Nix flake seems massive but is very versatile
+It is 
+* A developer environment with `nix develop` which installs a bunch of packages that I like when developing and the rust toolchain
+* A way to compile the project into a single binary which relies on the developer system via `nix build` _(default)_
+* A way to package that binary into a Docker Image via `nix buid .#docker` which targets the docker output
+
+and that last part isn't just a basic docker image. It builds the **minimal** docker image that is needed for the binary to run. 
+
+Nothing more, Nothing less. 
+
+**That resulted in the image size being 45.8 MB**
+
+
+Now time to run this image on the RasberryPi, But we need to install a OS onto it and configure it to run the website.
+We could do this with a OS like debian or Ubuntu but it's imperative configuration and requiring a bit of manual setup as well as not being able to lock certain packages causes some issue if I want to access this project 3 years later. 
+But NixOS is none of that, and I already am using Nix so it shouldn't be too hard
+
 ## Installing NixOS on the Pi
 
 First we want to grab a [NixOS image for ARM](https://hydra.nixos.org/job/nixos/trunk-combined/nixos.sd_image.aarch64-linux)
